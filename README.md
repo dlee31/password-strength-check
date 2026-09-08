@@ -48,6 +48,30 @@ pwscore.Evaluate("Password1")
 // Warnings: ["contains a common password or word"]
 ```
 
+## Using a bigger wordlist
+
+The built-in common-password list is deliberately short. If you have a real
+breach-corpus wordlist (one password per line), load it and check against it
+alongside the built-in list:
+
+```go
+f, err := os.Open("wordlist.txt")
+if err != nil {
+	log.Fatal(err)
+}
+defer f.Close()
+
+words, err := pwscore.LoadWordlist(f)
+if err != nil {
+	log.Fatal(err)
+}
+
+result := pwscore.EvaluateWithWordlist("Tr0ub4dor&3", words)
+```
+
+`LoadWordlist` skips blank lines and lines starting with `#`, so a wordlist
+file can carry comments. Matching is case-insensitive.
+
 ## How scoring works
 
 1. Figure out which character classes are present (lowercase, uppercase,
@@ -65,5 +89,8 @@ substitute for actual cryptographic randomness.
 
 ## Status
 
-Early. The common-password list and keyboard-walk detection are both
-deliberately small right now - see the roadmap for what's planned next.
+Early. The built-in common-password list and keyboard-walk detection are
+both deliberately small; use `EvaluateWithWordlist` if you need to check
+against something bigger. Still planned: per-script entropy estimates
+instead of a flat unicode pool, leetspeak-aware common-password matching,
+fuzz testing, benchmarks, and godoc examples.

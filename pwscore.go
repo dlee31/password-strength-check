@@ -10,6 +10,8 @@
 package pwscore
 
 import (
+	"bufio"
+	"io"
 	"math"
 	"strings"
 	"unicode"
@@ -40,8 +42,41 @@ var keyboardRuns = []string{
 	"qwertyuiop", "asdfghjkl", "zxcvbnm", "1234567890",
 }
 
+// LoadWordlist reads newline-separated passwords from r for use as extra
+// common-password matches alongside the built-in list. Blank lines and
+// lines starting with "#" are skipped so a wordlist file can carry
+// comments. Entries are lowercased since matching is case-insensitive.
+func LoadWordlist(r io.Reader) ([]string, error) {
+	var words []string
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		words = append(words, strings.ToLower(line))
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return words, nil
+}
+
 // Evaluate scores a password and explains the score.
 func Evaluate(password string) Result {
+	return evaluate(password, nil)
+}
+
+// EvaluateWithWordlist scores a password the same way Evaluate does, but
+// also matches it against extra common passwords (typically loaded with
+// LoadWordlist) in addition to the small built-in list. Use this when
+// you have a real breach-corpus wordlist and want it checked without
+// replacing the built-in patterns and penalties.
+func EvaluateWithWordlist(password string, extra []string) Result {
+	return evaluate(password, extra)
+}
+
+func evaluate(password string, extra []string) Result {
 	runes := []rune(password)
 	if len(runes) == 0 {
 		return Result{Warnings: []string{"password is empty"}}
@@ -70,7 +105,7 @@ func Evaluate(password string) Result {
 		warnings = append(warnings, "contains a keyboard walk")
 	}
 
-	if containsCommonPassword(lower) {
+	if containsCommonPassword(lower, extra) {
 		entropy -= 30
 		warnings = append(warnings, "contains a common password or word")
 	}
@@ -181,9 +216,17 @@ func containsKeyboardPattern(lower string) bool {
 	return false
 }
 
-func containsCommonPassword(lower string) bool {
+func containsCommonPassword(lower string, extra []string) bool {
 	for _, p := range commonPasswords {
 		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	for _, p := range extra {
+		if p == "" {
+			continue
+		}
+		if strings.Contains(lower, strings.ToLower(p)) {
 			return true
 		}
 	}

@@ -1,6 +1,9 @@
 package pwscore
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // These cases exist because naive entropy math gets every one of them
 // wrong: raw length-times-pool-size math scores "aaaaaaaaaa" and
@@ -67,6 +70,59 @@ func TestEvaluateUnicodeDoesNotPanic(t *testing.T) {
 				t.Errorf("Evaluate(%q).Entropy = %v, want >= 0", p, got.Entropy)
 			}
 		})
+	}
+}
+
+func TestEvaluateWithWordlist(t *testing.T) {
+	extra := []string{"correcthorsebatterystaple", "TrustNo1"}
+
+	// Not in the built-in list, so Evaluate alone won't flag it.
+	base := Evaluate("correcthorsebatterystaple99")
+	for _, w := range base.Warnings {
+		if strings.Contains(w, "common password") {
+			t.Fatalf("Evaluate flagged a word that isn't in the built-in list: %v", base.Warnings)
+		}
+	}
+
+	got := EvaluateWithWordlist("correcthorsebatterystaple99", extra)
+	found := false
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "common password") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("EvaluateWithWordlist(%q, %v).Warnings = %v, want a common-password warning",
+			"correcthorsebatterystaple99", extra, got.Warnings)
+	}
+
+	// Matching should be case-insensitive regardless of the case in extra.
+	got = EvaluateWithWordlist("mytrustno1word", extra)
+	found = false
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "common password") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("EvaluateWithWordlist should match extra words case-insensitively, got warnings %v", got.Warnings)
+	}
+}
+
+func TestLoadWordlist(t *testing.T) {
+	input := "# comment\nHunter2\n\n  qwerty12345  \n# another comment\ntrustno1\n"
+	words, err := LoadWordlist(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("LoadWordlist returned error: %v", err)
+	}
+	want := []string{"hunter2", "qwerty12345", "trustno1"}
+	if len(words) != len(want) {
+		t.Fatalf("LoadWordlist returned %v, want %v", words, want)
+	}
+	for i, w := range want {
+		if words[i] != w {
+			t.Errorf("LoadWordlist()[%d] = %q, want %q", i, words[i], w)
+		}
 	}
 }
 
