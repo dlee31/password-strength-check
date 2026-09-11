@@ -73,6 +73,28 @@ func TestEvaluateUnicodeDoesNotPanic(t *testing.T) {
 	}
 }
 
+// A password mixing two non-ASCII scripts should get credit for both
+// alphabets, not the single flat "other" bump the old pool used for any
+// non-ASCII input regardless of how many scripts were actually present.
+func TestClassifyPerScriptPool(t *testing.T) {
+	cyrillicOnly, _, _, _, _, _ := classify([]rune("привет"))
+	mixed, _, _, _, _, _ := classify([]rune("привет日本語"))
+
+	if mixed <= cyrillicOnly {
+		t.Errorf("classify pool for Cyrillic+Han (%d) should exceed Cyrillic alone (%d)", mixed, cyrillicOnly)
+	}
+
+	lower, _, _, _, _, _ := classify([]rune("привет"))
+	upper, _, _, _, _, _ := classify([]rune("ПРИВЕТ"))
+	both, _, _, _, _, _ := classify([]rune("Привет"))
+	if upper != lower {
+		t.Errorf("classify pool for all-uppercase Cyrillic (%d) should equal all-lowercase (%d)", upper, lower)
+	}
+	if both <= lower {
+		t.Errorf("classify pool for mixed-case Cyrillic (%d) should exceed single-case (%d)", both, lower)
+	}
+}
+
 func TestEvaluateWithWordlist(t *testing.T) {
 	extra := []string{"correcthorsebatterystaple", "TrustNo1"}
 

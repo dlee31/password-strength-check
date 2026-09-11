@@ -131,23 +131,87 @@ func evaluate(password string, extra []string) Result {
 	}
 }
 
+// scriptClass is a rough distinct-symbol estimate for one non-ASCII Unicode
+// script, used to size the entropy pool when a password draws on it. These
+// are conservative round numbers for the letters (and, for Han/Hangul, the
+// characters or syllables) actually in common use - not the full size of
+// the underlying Unicode block, which would overstate the entropy of a
+// password made from a handful of everyday characters. lowerPool is added
+// whenever the script is present at all; upperPool is added on top of that
+// for scripts that distinguish case (Cyrillic, Greek) when an uppercase
+// letter also appears. It stays 0 for scripts without case (Hebrew, Arabic,
+// Devanagari, Thai, Han, Hangul, Hiragana, Katakana).
+type scriptClass struct {
+	name      string
+	table     *unicode.RangeTable
+	lowerPool int
+	upperPool int
+}
+
+var otherScripts = []scriptClass{
+	{"Cyrillic", unicode.Cyrillic, 33, 33},
+	{"Greek", unicode.Greek, 24, 24},
+	{"Hebrew", unicode.Hebrew, 27, 0},
+	{"Arabic", unicode.Arabic, 36, 0},
+	{"Devanagari", unicode.Devanagari, 128, 0},
+	{"Thai", unicode.Thai, 70, 0},
+	{"Hangul", unicode.Hangul, 2350, 0},
+	{"Han", unicode.Han, 3500, 0},
+	{"Hiragana", unicode.Hiragana, 86, 0},
+	{"Katakana", unicode.Katakana, 90, 0},
+}
+
 // classify walks the password once and reports which character classes are
 // present, along with the resulting pool size used for the entropy estimate.
+// ASCII characters are bucketed the way they always were; anything outside
+// ASCII is matched against otherScripts so a password mixing, say, Cyrillic
+// and Han gets credit for both alphabets instead of one flat "other" bump.
 func classify(runes []rune) (pool int, hasLower, hasUpper, hasDigit, hasSymbol, hasOther bool) {
+	seenLower := make([]bool, len(otherScripts))
+	seenUpper := make([]bool, len(otherScripts))
+	otherFallback := false
+
 	for _, r := range runes {
-		switch {
-		case unicode.IsLower(r):
-			hasLower = true
-		case unicode.IsUpper(r):
-			hasUpper = true
-		case unicode.IsDigit(r):
-			hasDigit = true
-		case r <= unicode.MaxASCII && unicode.IsPrint(r):
-			hasSymbol = true
-		default:
+		if r <= unicode.MaxASCII {
+			switch {
+			case unicode.IsLower(r):
+				hasLower = true
+			case unicode.IsUpper(r):
+				hasUpper = true
+			case unicode.IsDigit(r):
+				hasDigit = true
+			case unicode.IsPrint(r):
+				hasSymbol = true
+			default:
+				hasOther = true
+				otherFallback = true
+			}
+			continue
+		}
+
+		matched := false
+		for i, s := range otherScripts {
+			if !unicode.Is(s.table, r) {
+				continue
+			}
+			matched = true
 			hasOther = true
+			if s.upperPool > 0 && unicode.IsUpper(r) {
+				seenUpper[i] = true
+			} else {
+				seenLower[i] = true
+			}
+			break
+		}
+		if !matched {
+			// Some script or symbol block not in otherScripts (emoji, rare
+			// scripts, etc). Give it the same rough floor the old flat
+			// pool used for all non-ASCII input.
+			hasOther = true
+			otherFallback = true
 		}
 	}
+
 	if hasLower {
 		pool += 26
 	}
@@ -160,9 +224,15 @@ func classify(runes []rune) (pool int, hasLower, hasUpper, hasDigit, hasSymbol, 
 	if hasSymbol {
 		pool += 33
 	}
-	if hasOther {
-		// Rough floor for "some other script or symbol block". Not accurate
-		// per-script, but better than pretending it adds nothing.
+	for i, s := range otherScripts {
+		if seenLower[i] {
+			pool += s.lowerPool
+		}
+		if seenUpper[i] {
+			pool += s.upperPool
+		}
+	}
+	if otherFallback {
 		pool += 100
 	}
 	return pool, hasLower, hasUpper, hasDigit, hasSymbol, hasOther
